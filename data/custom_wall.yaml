@@ -1,0 +1,6 @@
+train: wall_data/train
+val: wall_data/val
+
+nc: 1  # number of classes
+
+names: [ 'wall'] # class names
