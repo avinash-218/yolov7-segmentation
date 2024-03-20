@@ -1,8 +1,11 @@
-import cv2, os
+import cv2
+import os
 import numpy as np
 import onnxruntime
-from util import *
 from pathlib import Path
+import torch
+from util import preprocess, non_max_suppression, Annotator, Colors, process_mask, scale_coords, plot_masks, scale_masks, save_one_box
+colors = Colors()
 
 conf_thres = 0.25
 iou_thres = 0.45

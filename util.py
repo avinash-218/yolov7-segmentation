@@ -1,83 +1,29 @@
 import cv2
 import time
 import numpy as np
-from utils.plots import colors
 import torch
 from pathlib import Path
 import os
-import glob
-import math
+from PIL import Image, ImageDraw, ImageFont
 
 IMG_FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff', 'webp'  # include image suffixes
 
-class LoadImages:
-    # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
-    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None):
-        files = []
-        for p in sorted(path) if isinstance(path, (list, tuple)) else [path]:
-            p = str(Path(p).resolve())
-            if '*' in p:
-                files.extend(sorted(glob.glob(p, recursive=True)))  # glob
-            elif os.path.isdir(p):
-                files.extend(sorted(glob.glob(os.path.join(p, '*.*'))))  # dir
-            elif os.path.isfile(p):
-                files.append(p)  # files
-            else:
-                raise FileNotFoundError(f'{p} does not exist')
+class Colors:
+    # Ultralytics color palette https://ultralytics.com/
+    def __init__(self):
+        # hex = matplotlib.colors.TABLEAU_COLORS.values()
+        hexs = ('FF3838', 'FF9D97', 'FF701F', 'FFB21D', 'CFD231', '48F90A', '92CC17', '3DDB86', '1A9334', '00D4BB',
+                '2C99A8', '00C2FF', '344593', '6473FF', '0018EC', '8438FF', '520085', 'CB38FF', 'FF95C8', 'FF37C7')
+        self.palette = [self.hex2rgb(f'#{c}') for c in hexs]
+        self.n = len(self.palette)
 
-        images = [x for x in files if x.split('.')[-1].lower() in IMG_FORMATS]
-        ni = len(images)
+    def __call__(self, i, bgr=False):
+        c = self.palette[int(i) % self.n]
+        return (c[2], c[1], c[0]) if bgr else c
 
-        self.img_size = img_size
-        self.stride = stride
-        self.files = images
-        self.nf = ni
-        self.video_flag = [False] * ni
-        self.mode = 'image'
-        self.auto = auto
-        self.transforms = transforms  # optional
-
-    def __iter__(self):
-        self.count = 0
-        return self
-
-    def __next__(self):
-        if self.count == self.nf:
-            raise StopIteration
-        path = self.files[self.count]
-
-        # Read image
-        self.count += 1
-        im0 = cv2.imread(path)  # BGR
-        assert im0 is not None, f'Image Not Found {path}'
-        s = f'image {self.count}/{self.nf} {path}: '
-
-        if self.transforms:
-            im = self.transforms(cv2.cvtColor(im0, cv2.COLOR_BGR2RGB))  # transforms
-        else:
-            im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
-            im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-            im = np.ascontiguousarray(im)  # contiguous
-
-        return path, im, im0, s
-
-    def __len__(self):
-        return self.nf  # number of files
-
-def make_divisible(x, divisor):
-    # Returns nearest x divisible by divisor
-    if isinstance(divisor, torch.Tensor):
-        divisor = int(divisor.max())  # to int
-    return math.ceil(x / divisor) * divisor
-
-def check_img_size(imgsz, s=32, floor=0):
-    # Verify image size is a multiple of stride s in each dimension
-    if isinstance(imgsz, int):  # integer i.e. img_size=640
-        new_size = max(make_divisible(imgsz, int(s)), floor)
-    else:  # list i.e. img_size=[640, 480]
-        imgsz = list(imgsz)  # convert to list if tuple
-        new_size = [max(make_divisible(x, int(s)), floor) for x in imgsz]
-    return new_size
+    @staticmethod
+    def hex2rgb(h):  # rgb order (PIL)
+        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
 
 def xywh2xyxy(x):
     # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
@@ -87,25 +33,6 @@ def xywh2xyxy(x):
     y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
     y[:, 3] = x[:, 1] + x[:, 3] / 2  # bottom right y
     return y
-
-def clip_boxes(boxes, shape):
-    boxes[..., [0, 2]] = boxes[..., [0, 2]].clip(0, shape[1])  # x1, x2
-    boxes[..., [1, 3]] = boxes[..., [1, 3]].clip(0, shape[0])  # y1, y2
-
-def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
-    # Rescale coords (xyxy) from img1_shape to img0_shape
-    if ratio_pad is None:  # calculate from img0_shape
-        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
-        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
-    else:
-        gain = ratio_pad[0][0]
-        pad = ratio_pad[1]
-
-    boxes[:, [0, 2]] -= pad[0]  # x padding
-    boxes[:, [1, 3]] -= pad[1]  # y padding
-    boxes[:, :4] /= gain
-    clip_boxes(boxes, img0_shape)
-    return boxes
 
 def crop_mask(masks, boxes):
     n, h, w = masks.shape
@@ -345,69 +272,6 @@ def plot_masks(img, masks, colors, alpha=0.5):
     img_gpu = img_gpu * inv_alph_masks.prod(dim=0) + masks_color_summand
     return (img_gpu * 255).byte().cpu().numpy()
 
-def postprocess(preds, img, orig_img, conf_thres, iou_thres, classes=None):
-    p = non_max_suppression(preds[0], conf_thres, iou_thres, classes)
-    for i, pred in enumerate(p):  # per image
-        shape = orig_img.shape
-        results = []
-        proto = preds[1]  
-        if not len(preds):
-            results.append([[], [], []])  # save empty boxes
-            continue
-        masks = process_mask(proto[i], pred[:, 6:], pred[:, :4], img.shape[2:], upsample=True)  # HWC
-        pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], shape).round()
-
-        results.append([pred[:, :6], masks, shape[:2]])
-    return results
-
-def gen_color(class_num):
-    color_list = []
-    np.random.seed(1)
-    while 1:
-        a = list(map(int, np.random.choice(range(255),3)))
-        if(np.sum(a)==0): continue
-        color_list.append(a)
-        if len(color_list)==class_num: break
-    return color_list
-
-def vis_result(image_3c, results, colorlist, CLASSES, result_path):
-    boxes, masks, shape = results
-
-    if masks.ndim == 2:
-        masks = np.expand_dims(masks, axis=0).astype(np.float32)
-    # Convert the image_3c color space from BGR to RGB
-    image_3c = cv2.cvtColor(image_3c, cv2.COLOR_RGB2BGR)
-    vis_img = image_3c.copy()
-    mask_img = np.zeros_like(image_3c)
-    cls_list = []
-    center_list = []
-    for box, mask in zip(boxes, masks):
-        cls=int(box[-1])
-        cls_list.append(cls)
-        dummy_img = np.zeros_like(image_3c)
-        dummy_img[mask!=0] = colorlist[int(box[-1])] ## cls=int(box[-1])
-        mask_img[mask!=0] = colorlist[int(box[-1])] ## cls=int(box[-1])
-        centroid = np.mean(np.argwhere(dummy_img),axis=0)
-        if np.isnan(centroid).all() == False:
-            centroid_x, centroid_y = int(centroid[1]), int(centroid[0])
-            center_list.append([centroid_x, centroid_y])
-    vis_img = cv2.addWeighted(vis_img,0.5,mask_img,0.5,0)
-    for i, box in enumerate (boxes):
-        cls=int(box[-1])
-        cv2.rectangle(vis_img, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0,0,255),3,4)
-        cv2.putText(vis_img, f"{CLASSES[cls]}:{round(box[4],2)}", (int(box[0]), int(box[1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-    for j in range (len(center_list)):
-        cv2.circle(vis_img, (center_list[j][0], center_list[j][1]), radius=5, color=(0, 0, 255), thickness=-1)
-    vis_img = np.concatenate([image_3c, mask_img, vis_img],axis=1)
-    for i in range (len(CLASSES)):
-        num = cls_list.count(i)
-        if num != 0:
-            print(f"Found {num} {CLASSES[i]}")
-    cv2.imwrite(f"./{result_path}/origin_image.jpg", image_3c)
-    cv2.imwrite(f"./{result_path}/mask_image.jpg", mask_img)
-    cv2.imwrite(f"./{result_path}/visual_image.jpg", vis_img)
-    return mask_img, vis_img
-
 def clip_coords(boxes, shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
     if isinstance(boxes, torch.Tensor):  # faster individually
@@ -513,8 +377,6 @@ def save_one_box(xyxy, im, file=Path('im.jpg'), gain=1.02, pad=10, square=False,
         Image.fromarray(crop[..., ::-1]).save(f, quality=95, subsampling=0)  # save RGB
     return crop
 
-from PIL import Image, ImageDraw, ImageFont
-
 def is_ascii(s=''):
     # Is string composed of all ASCII (no UTF) characters? (note str().isascii() introduced in python 3.7)
     s = str(s)  # convert list, tuple, None, etc. to str
@@ -606,4 +468,3 @@ class Annotator:
     def result(self):
         # Return annotated image as array
         return np.asarray(self.im)
-
