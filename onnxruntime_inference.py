@@ -9,8 +9,8 @@ colors = Colors()
 
 conf_thres = 0.25
 iou_thres = 0.45
-input_width = 640
-input_height = 640
+input_width = 1024
+input_height = 1024
 result_path = "./result"
 image_path = "./data/images/3.png"
 model_name = 'walls'
