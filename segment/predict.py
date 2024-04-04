@@ -12,6 +12,7 @@ import skimage
 from sort_count import *
 import numpy as np
 #...........................
+import cv2
 
 
 FILE = Path(__file__).resolve()
@@ -183,7 +184,10 @@ def run(
                         annotator.draw_id(bbox_xyxy, identities, categories, names)
             
                 # Write results
+                orig_image = cv2.imread(path)
                 for j, (*xyxy, conf, cls) in enumerate(reversed(det[:, :6])):
+                    x_min, y_min, x_max, y_max = xyxy
+                    cv2.rectangle(orig_image, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 2)  # Draw rectangle
                     if save_txt:  # Write to file
                         segj = segments[j].reshape(-1)  # (n,2) to (n*2)
                         line = (cls, *segj, conf) if save_conf else (cls, *segj)  # label format
@@ -196,6 +200,8 @@ def run(
                         annotator.box_label(xyxy, label, color=colors(c, True))
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                plt_name = 'Output/' + os.path.basename(path)
+                cv2.imwrite(plt_name, orig_image)
 
             # Stream results
             im0 = annotator.result()

@@ -12,7 +12,7 @@ iou_thres = 0.45
 input_width = 1024
 input_height = 1024
 result_path = "./result"
-image_path = "./data/images/3.png"
+image_path = "./data/images/20.png"
 model_name = 'walls'
 model_path = "./"
 ONNX_MODEL = f"walls.onnx"
@@ -62,13 +62,18 @@ for i, det in enumerate(pred):  # per image
         # Mask plotting ----------------------------------------------------------------------------------------
 
         # Write results
+        orig_image = cv2.imread(image_path)
         for j, (*xyxy, conf, cls) in enumerate(reversed(det[:, :6])):
+            x_min, y_min, x_max, y_max = xyxy
+            cv2.rectangle(orig_image, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 2)  # Draw rectangle
             if save_img or save_crop:  # Add bbox to image
                 c = int(cls)  # integer class
                 label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                 annotator.box_label(xyxy, label, color=colors(c, True))
             if save_crop:
                 save_one_box(xyxy, imc, file='.' / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+        plt_name = 'Output/' + os.path.basename(image_path)
+        cv2.imwrite(plt_name, orig_image)
 
     # Stream results
     im0 = annotator.result()
